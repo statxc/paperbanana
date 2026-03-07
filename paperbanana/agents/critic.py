@@ -60,7 +60,7 @@ class CriticAgent(BaseAgent):
         prompt_type = "diagram" if diagram_type == DiagramType.METHODOLOGY else "plot"
         template = self.load_prompt(prompt_type)
         prompt_label = self._prompt_label_from_image_path(image_path) or "critic"
-        # Build prompt without going through format_prompt so we can record once after appending user_feedback
+        # Build prompt manually so we record once after appending user_feedback.
         prompt = template.format(
             source_context=source_context,
             caption=caption,
