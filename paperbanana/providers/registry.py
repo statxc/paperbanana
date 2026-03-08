@@ -90,7 +90,8 @@ class ProviderRegistry:
 
             return GeminiVLM(
                 api_key=settings.google_api_key,
-                model=settings.vlm_model,
+                model=settings.google_vlm_model or settings.vlm_model,
+                base_url=settings.google_base_url,
             )
         elif provider == "openrouter":
             _validate_api_key(settings.openrouter_api_key, "OPENROUTER_API_KEY")
@@ -144,7 +145,8 @@ class ProviderRegistry:
 
             return GoogleImagenGen(
                 api_key=settings.google_api_key,
-                model=settings.image_model,
+                model=settings.google_image_model or settings.image_model,
+                base_url=settings.google_base_url,
             )
         elif provider == "openrouter_imagen":
             _validate_api_key(settings.openrouter_api_key, "OPENROUTER_API_KEY")

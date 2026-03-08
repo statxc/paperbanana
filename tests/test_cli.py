@@ -153,3 +153,85 @@ def test_ablate_retrieval_writes_report(monkeypatch):
     finally:
         Path(input_path).unlink(missing_ok=True)
         Path(report_path).unlink(missing_ok=True)
+
+
+def test_setup_official_api_flow_writes_key_and_clears_base_url(monkeypatch):
+    """Official setup flow writes key and resets GOOGLE_BASE_URL to default."""
+    answers = iter(
+        [
+            "y",
+            "n",
+            "test-gemini-key",
+        ]
+    )
+    monkeypatch.setattr("paperbanana.cli.Prompt.ask", lambda *args, **kwargs: next(answers))
+
+    with runner.isolated_filesystem():
+        result = runner.invoke(app, ["setup"])
+        assert result.exit_code == 0
+        env_text = Path(".env").read_text(encoding="utf-8")
+        assert "GOOGLE_API_KEY=test-gemini-key" in env_text
+        assert "GOOGLE_BASE_URL=" in env_text
+
+
+def test_setup_updates_existing_env_without_overwrite(monkeypatch):
+    """setup updates target keys while preserving unrelated existing env vars."""
+    answers = iter(
+        [
+            "y",
+            "n",
+            "new-gemini-key",
+        ]
+    )
+    monkeypatch.setattr("paperbanana.cli.Prompt.ask", lambda *args, **kwargs: next(answers))
+
+    with runner.isolated_filesystem():
+        Path(".env").write_text(
+            "OPENAI_API_KEY=existing-openai-key\nGOOGLE_API_KEY=old-key\n",
+            encoding="utf-8",
+        )
+        result = runner.invoke(app, ["setup"])
+        assert result.exit_code == 0
+        env_text = Path(".env").read_text(encoding="utf-8")
+        assert "OPENAI_API_KEY=existing-openai-key" in env_text
+        assert "GOOGLE_API_KEY=new-gemini-key" in env_text
+        assert "GOOGLE_BASE_URL=" in env_text
+
+
+def test_setup_custom_endpoint_flow_writes_url_and_key(monkeypatch):
+    """Custom endpoint setup flow writes both GOOGLE_BASE_URL and GOOGLE_API_KEY."""
+    answers = iter(
+        [
+            "n",
+            "https://gemini-proxy.example.com",
+            "key-custom",
+        ]
+    )
+    monkeypatch.setattr("paperbanana.cli.Prompt.ask", lambda *args, **kwargs: next(answers))
+
+    with runner.isolated_filesystem():
+        result = runner.invoke(app, ["setup"])
+        assert result.exit_code == 0
+        env_text = Path(".env").read_text(encoding="utf-8")
+        assert "GOOGLE_API_KEY=key-custom" in env_text
+        assert "GOOGLE_BASE_URL=https://gemini-proxy.example.com" in env_text
+
+
+def test_setup_custom_endpoint_requires_non_empty_url(monkeypatch):
+    """Custom endpoint flow re-prompts when URL is empty."""
+    answers = iter(
+        [
+            "n",
+            "",
+            "https://gemini-proxy.example.com",
+            "key-custom",
+        ]
+    )
+    monkeypatch.setattr("paperbanana.cli.Prompt.ask", lambda *args, **kwargs: next(answers))
+
+    with runner.isolated_filesystem():
+        result = runner.invoke(app, ["setup"])
+        assert result.exit_code == 0
+        assert "URL cannot be empty" in result.output
+        env_text = Path(".env").read_text(encoding="utf-8")
+        assert "GOOGLE_BASE_URL=https://gemini-proxy.example.com" in env_text

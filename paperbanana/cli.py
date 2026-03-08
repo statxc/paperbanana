@@ -33,6 +33,32 @@ data_app = typer.Typer(
 app.add_typer(data_app, name="data")
 
 
+def _upsert_env_vars(env_path: Path, updates: dict[str, str]) -> None:
+    """Update or append environment variables in a .env file."""
+    if env_path.exists():
+        lines = env_path.read_text(encoding="utf-8").splitlines()
+    else:
+        lines = []
+
+    key_to_index: dict[str, int] = {}
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in line:
+            continue
+        key = line.split("=", 1)[0].strip()
+        if key not in key_to_index:
+            key_to_index[key] = index
+
+    for key, value in updates.items():
+        new_line = f"{key}={value}"
+        if key in key_to_index:
+            lines[key_to_index[key]] = new_line
+        else:
+            lines.append(new_line)
+
+    env_path.write_text("\n".join(lines).rstrip("\n") + "\n", encoding="utf-8")
+
+
 @app.command()
 def generate(
     input: Optional[str] = typer.Option(
@@ -567,29 +593,51 @@ def setup():
         )
     )
 
-    console.print("\n[bold]Step 1: Google Gemini API Key[/bold] (FREE, no credit card)")
-    console.print("This powers the AI agents that plan and critique your diagrams.\n")
-
-    import webbrowser
-
-    open_browser = Prompt.ask(
-        "Open browser to get a free Gemini API key?",
+    console.print("\n[bold]Step 1: Gemini API Configuration[/bold]")
+    use_official_api = Prompt.ask(
+        "Use official Google Gemini API?",
         choices=["y", "n"],
         default="y",
     )
-    if open_browser == "y":
-        webbrowser.open("https://makersuite.google.com/app/apikey")
-
-    gemini_key = Prompt.ask("\nPaste your Gemini API key")
 
     # Save to .env
     env_path = Path(".env")
-    lines = []
-    lines.append(f"GOOGLE_API_KEY={gemini_key}")
+    if use_official_api == "y":
+        console.print("Using official Google AI Studio endpoint (free, no credit card).")
+        console.print("This powers the AI agents that plan and critique your diagrams.\n")
 
-    env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        import webbrowser
 
-    console.print(f"\n[green]Setup complete![/green] Keys saved to {env_path}")
+        open_browser = Prompt.ask(
+            "Open browser to get a free Gemini API key?",
+            choices=["y", "n"],
+            default="y",
+        )
+        if open_browser == "y":
+            webbrowser.open("https://makersuite.google.com/app/apikey")
+
+        gemini_key = Prompt.ask("\nPaste your Gemini API key")
+        env_updates = {
+            "GOOGLE_API_KEY": gemini_key,
+            "GOOGLE_BASE_URL": "",
+        }
+    else:
+        console.print("Using custom Gemini-compatible endpoint.\n")
+        google_base_url = ""
+        while not google_base_url.strip():
+            google_base_url = Prompt.ask("Gemini base URL")
+            if not google_base_url.strip():
+                console.print("[red]URL cannot be empty. Please try again.[/red]")
+
+        gemini_key = Prompt.ask("Paste your Gemini API key")
+        env_updates = {
+            "GOOGLE_API_KEY": gemini_key,
+            "GOOGLE_BASE_URL": google_base_url.strip(),
+        }
+
+    _upsert_env_vars(env_path, env_updates)
+
+    console.print(f"\n[green]Setup complete![/green] Configuration saved to {env_path}")
     console.print("\nTry it out:")
     console.print(
         "  [bold]paperbanana generate --input method.txt"

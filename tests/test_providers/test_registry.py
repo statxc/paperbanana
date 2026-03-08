@@ -20,6 +20,21 @@ def test_create_gemini_vlm():
     assert vlm.model_name == "gemini-2.0-flash"
 
 
+def test_create_gemini_vlm_with_model_and_base_url_override():
+    """Gemini VLM uses gemini-specific model and base URL overrides."""
+    settings = Settings(
+        vlm_provider="gemini",
+        vlm_model="gemini-2.0-flash",
+        google_vlm_model="gemini-2.5-flash",
+        google_base_url="https://gemini-proxy.example.com",
+        google_api_key="test-key",
+    )
+    vlm = ProviderRegistry.create_vlm(settings)
+    assert vlm.name == "gemini"
+    assert vlm.model_name == "gemini-2.5-flash"
+    assert getattr(vlm, "_base_url") == "https://gemini-proxy.example.com"
+
+
 def test_create_google_imagen_gen():
     """Test creating a Google Imagen image gen provider."""
     settings = Settings(
@@ -28,6 +43,21 @@ def test_create_google_imagen_gen():
     )
     gen = ProviderRegistry.create_image_gen(settings)
     assert gen.name == "google_imagen"
+
+
+def test_create_google_imagen_with_model_and_base_url_override():
+    """Google Imagen uses gemini-specific model and base URL overrides."""
+    settings = Settings(
+        image_provider="google_imagen",
+        image_model="gemini-3-pro-image-preview",
+        google_image_model="gemini-2.5-flash-image-preview",
+        google_base_url="https://gemini-proxy.example.com",
+        google_api_key="test-key",
+    )
+    gen = ProviderRegistry.create_image_gen(settings)
+    assert gen.name == "google_imagen"
+    assert gen.model_name == "gemini-2.5-flash-image-preview"
+    assert getattr(gen, "_base_url") == "https://gemini-proxy.example.com"
 
 
 def test_missing_google_api_key_raises_helpful_error():

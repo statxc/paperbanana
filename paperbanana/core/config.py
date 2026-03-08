@@ -94,6 +94,9 @@ class Settings(BaseSettings):
     openrouter_api_key: Optional[str] = Field(default=None, alias="OPENROUTER_API_KEY")
     openai_api_key: Optional[str] = Field(default=None, alias="OPENAI_API_KEY")
     anthropic_api_key: Optional[str] = Field(default=None, alias="ANTHROPIC_API_KEY")
+    google_base_url: Optional[str] = Field(default=None, alias="GOOGLE_BASE_URL")
+    google_vlm_model: Optional[str] = Field(default=None, alias="GOOGLE_VLM_MODEL")
+    google_image_model: Optional[str] = Field(default=None, alias="GOOGLE_IMAGE_MODEL")
     openai_base_url: str = Field(default="https://api.openai.com/v1", alias="OPENAI_BASE_URL")
     openai_vlm_model: Optional[str] = Field(default=None, alias="OPENAI_VLM_MODEL")
     openai_image_model: Optional[str] = Field(default=None, alias="OPENAI_IMAGE_MODEL")
@@ -107,6 +110,8 @@ class Settings(BaseSettings):
     @property
     def effective_vlm_model(self) -> str:
         """Return the VLM model for the active provider."""
+        if self.vlm_provider == "gemini" and self.google_vlm_model:
+            return self.google_vlm_model
         if self.vlm_provider == "openai" and self.openai_vlm_model:
             return self.openai_vlm_model
         if self.vlm_provider == "bedrock" and self.bedrock_vlm_model:
@@ -116,6 +121,8 @@ class Settings(BaseSettings):
     @property
     def effective_image_model(self) -> str:
         """Return the image model for the active provider."""
+        if self.image_provider == "google_imagen" and self.google_image_model:
+            return self.google_image_model
         if self.image_provider == "openai_imagen" and self.openai_image_model:
             return self.openai_image_model
         if self.image_provider == "bedrock_imagen" and self.bedrock_image_model:

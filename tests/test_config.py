@@ -96,3 +96,23 @@ def test_seed_accepts_integer():
     """seed is accepted and stored."""
     settings = Settings(seed=1234)
     assert settings.seed == 1234
+
+
+def test_effective_vlm_model_gemini_override():
+    """Gemini VLM model override is used when provider is gemini."""
+    settings = Settings(
+        vlm_provider="gemini",
+        vlm_model="gemini-2.0-flash",
+        google_vlm_model="gemini-2.5-flash",
+    )
+    assert settings.effective_vlm_model == "gemini-2.5-flash"
+
+
+def test_effective_image_model_gemini_override():
+    """Gemini image model override is used when provider is google_imagen."""
+    settings = Settings(
+        image_provider="google_imagen",
+        image_model="gemini-3-pro-image-preview",
+        google_image_model="gemini-2.5-flash-image-preview",
+    )
+    assert settings.effective_image_model == "gemini-2.5-flash-image-preview"

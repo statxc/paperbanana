@@ -75,9 +75,15 @@ pip install -e ".[dev,openai,google]"
 cp .env.example .env
 # Edit .env and add your API key:
 #   OPENAI_API_KEY=your-key-here
+#   GOOGLE_API_KEY=your-key-here
 #
 # For Azure OpenAI / Foundry:
 #   OPENAI_BASE_URL=https://<resource>.openai.azure.com/openai/v1
+#
+# Optional Gemini overrides:
+#   GOOGLE_BASE_URL=https://your-gemini-proxy.example.com
+#   GOOGLE_VLM_MODEL=gemini-2.0-flash
+#   GOOGLE_IMAGE_MODEL=gemini-3-pro-image-preview
 ```
 
 Or use the setup wizard for Gemini:
@@ -142,6 +148,7 @@ PaperBanana supports multiple VLM and image generation providers:
 | VLM / Image | OpenRouter | Any supported model | Flexible routing |
 
 Azure OpenAI / Foundry endpoints are auto-detected — set `OPENAI_BASE_URL` to your endpoint.
+Gemini-compatible gateways are also supported — set `GOOGLE_BASE_URL` when needed.
 
 ---
 
@@ -234,7 +241,8 @@ Scores on 4 dimensions (hierarchical aggregation per the paper):
 paperbanana setup
 ```
 
-Interactive wizard that walks you through obtaining a Google Gemini API key and saving it to `.env`.
+Interactive wizard that first asks whether to use the official Gemini API.
+If you choose official API, it follows the default AI Studio key flow; if not, it asks for a custom Gemini-compatible URL and API key.
 
 ---
 
@@ -361,6 +369,9 @@ OPENAI_IMAGE_MODEL=gpt-image-1.5              # override model
 
 # Google Gemini (alternative, free)
 GOOGLE_API_KEY=your-key
+GOOGLE_BASE_URL=                            # optional custom Gemini-compatible endpoint
+GOOGLE_VLM_MODEL=gemini-2.0-flash          # override Gemini VLM model
+GOOGLE_IMAGE_MODEL=gemini-3-pro-image-preview  # override Gemini image model
 ```
 
 ---
