@@ -146,6 +146,7 @@ class ProviderRegistry:
                 model=settings.openai_vlm_model or settings.vlm_model,
                 base_url=settings.openai_base_url,
                 json_mode=settings.openai_local_json_mode,
+                provider_name="openai_local",
             )
         else:
             raise ValueError(

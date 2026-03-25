@@ -67,6 +67,12 @@ class OllamaVLM(VLMProvider):
             )
         return self._client
 
+    async def close(self) -> None:
+        """Close the underlying HTTP client to release connections."""
+        if self._client is not None:
+            await self._client.aclose()
+            self._client = None
+
     def is_available(self) -> bool:
         """Ollama doesn't need an API key — just check if the server is reachable."""
         import httpx

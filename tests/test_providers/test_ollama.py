@@ -30,6 +30,7 @@ class _FakeAsyncClient:
     def __init__(self, response_text: str = "hello"):
         self.captured: dict[str, Any] = {}
         self._response_text = response_text
+        self.closed = False
 
     async def post(self, url: str, json: dict | None = None, **kwargs):
         self.captured["url"] = url
@@ -40,6 +41,9 @@ class _FakeAsyncClient:
                 "usage": {"prompt_tokens": 10, "completion_tokens": 5},
             }
         )
+
+    async def aclose(self):
+        self.closed = True
 
 
 @pytest.fixture
@@ -135,3 +139,21 @@ async def test_system_prompt_included(ollama_vlm: OllamaVLM):
     messages = fake_client.captured["json"]["messages"]
     assert messages[0]["role"] == "system"
     assert messages[0]["content"] == "You are helpful."
+
+
+@pytest.mark.asyncio
+async def test_close_releases_client(ollama_vlm: OllamaVLM):
+    """close() should call aclose on the httpx client and reset it."""
+    fake_client = _FakeAsyncClient()
+    ollama_vlm._client = fake_client
+
+    await ollama_vlm.close()
+
+    assert fake_client.closed is True
+    assert ollama_vlm._client is None
+
+
+@pytest.mark.asyncio
+async def test_close_noop_when_no_client(ollama_vlm: OllamaVLM):
+    """close() on a fresh provider (no client created yet) should not error."""
+    await ollama_vlm.close()

@@ -95,7 +95,7 @@ class TestSupportsJsonMode:
         )
         vlm = ProviderRegistry.create_vlm(settings)
         assert vlm.supports_json_mode is False
-        assert vlm.name == "openai"
+        assert vlm.name == "openai_local"
 
     def test_openai_local_json_mode_override(self):
         settings = Settings(
@@ -149,7 +149,7 @@ class TestRegistryLocalProviders:
             openai_base_url="http://localhost:8000/v1",
         )
         vlm = ProviderRegistry.create_vlm(settings)
-        assert vlm.name == "openai"
+        assert vlm.name == "openai_local"
         assert vlm.model_name == "Qwen/Qwen2.5-VL-7B-Instruct"
 
     def test_unknown_provider_error_message_includes_new_providers(self):
