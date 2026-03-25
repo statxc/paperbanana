@@ -161,10 +161,11 @@ class PaperBananaPipeline:
                 max_retries=self.settings.exemplar_retrieval_max_retries,
             )
 
-        # Load guidelines
+        # Load guidelines (venue-aware resolution)
         guidelines_path = self.settings.guidelines_path
-        self._methodology_guidelines = load_methodology_guidelines(guidelines_path)
-        self._plot_guidelines = load_plot_guidelines(guidelines_path)
+        venue = self.settings.venue
+        self._methodology_guidelines = load_methodology_guidelines(guidelines_path, venue=venue)
+        self._plot_guidelines = load_plot_guidelines(guidelines_path, venue=venue)
 
         # Initialize agents
         prompt_dir = self._find_prompt_dir()
