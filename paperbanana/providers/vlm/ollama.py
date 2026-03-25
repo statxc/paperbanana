@@ -116,6 +116,7 @@ class OllamaVLM(VLMProvider):
             "model": self._model,
             "messages": messages,
             "temperature": temperature,
+            "max_tokens": max_tokens,
         }
 
         # Only request JSON mode when the model actually supports it.
