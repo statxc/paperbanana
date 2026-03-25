@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Optional
 
@@ -14,7 +13,7 @@ from paperbanana.core.types import (
     DimensionResult,
     EvaluationScore,
 )
-from paperbanana.core.utils import load_image
+from paperbanana.core.utils import extract_json, load_image
 from paperbanana.providers.base import VLMProvider
 
 logger = structlog.get_logger()
@@ -66,8 +65,9 @@ class VLMJudge:
 
         results: dict[str, DimensionResult] = {}
 
+        use_json = getattr(self.vlm, "supports_json_mode", True)
         for dim in DIMENSIONS:
-            logger.info("Evaluating dimension", dimension=dim)
+            logger.info("Evaluating dimension", dimension=dim, json_mode=use_json)
 
             prompt = self._load_eval_prompt(dim, source_context, caption)
 
@@ -76,7 +76,7 @@ class VLMJudge:
                 images=images,
                 temperature=0.1,
                 max_tokens=1024,
-                response_format="json",
+                response_format="json" if use_json else None,
             )
 
             results[dim] = self._parse_result(response, dim)
@@ -104,13 +104,16 @@ class VLMJudge:
         return template.format(source_context=source_context, caption=caption)
 
     def _parse_result(self, response: str, dimension: str) -> DimensionResult:
-        """Parse a comparative result from VLM response."""
-        try:
-            data = json.loads(response)
+        """Parse a comparative result from VLM response.
+
+        Uses extract_json for robust parsing so open-weight models that
+        wrap JSON in markdown or conversational text still work.
+        """
+        data = extract_json(response)
+        if isinstance(data, dict):
             winner = data.get("winner", "Both are good")
             reasoning = data.get("comparison_reasoning", "")
 
-            # Validate winner value
             if winner not in VALID_WINNERS:
                 logger.warning(
                     "Invalid winner value, defaulting to tie",
@@ -121,17 +124,16 @@ class VLMJudge:
 
             score = WINNER_SCORE_MAP.get(winner, 50.0)
             return DimensionResult(winner=winner, score=score, reasoning=reasoning)
-        except (json.JSONDecodeError, ValueError, TypeError) as e:
-            logger.warning(
-                "Failed to parse evaluation response",
-                dimension=dimension,
-                error=str(e),
-            )
-            return DimensionResult(
-                winner="Both are good",
-                score=50.0,
-                reasoning="Could not parse evaluation response.",
-            )
+
+        logger.warning(
+            "Failed to parse evaluation response",
+            dimension=dimension,
+        )
+        return DimensionResult(
+            winner="Both are good",
+            score=50.0,
+            reasoning="Could not parse evaluation response.",
+        )
 
     def _hierarchical_aggregate(self, results: dict[str, DimensionResult]) -> str:
         """Apply hierarchical aggregation per paper Section 4.2.

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import re
 from typing import Optional
 
@@ -10,7 +9,7 @@ import structlog
 
 from paperbanana.agents.base import BaseAgent
 from paperbanana.core.types import CritiqueResult, DiagramType
-from paperbanana.core.utils import load_image
+from paperbanana.core.utils import extract_json, load_image
 from paperbanana.providers.base import VLMProvider
 
 logger = structlog.get_logger()
@@ -83,14 +82,15 @@ class CriticAgent(BaseAgent):
             except Exception:
                 logger.warning("Prompt recording failed", agent=self.agent_name, label=prompt_label)
 
-        logger.info("Running critic agent", image_path=image_path)
+        use_json = getattr(self.vlm, "supports_json_mode", True)
+        logger.info("Running critic agent", image_path=image_path, json_mode=use_json)
 
         response = await self.vlm.generate(
             prompt=prompt,
             images=[image],
             temperature=0.3,
             max_tokens=4096,
-            response_format="json",
+            response_format="json" if use_json else None,
         )
 
         critique = self._parse_response(response)
@@ -110,17 +110,24 @@ class CriticAgent(BaseAgent):
         return f"critic_iter_{m.group(1)}"
 
     def _parse_response(self, response: str) -> CritiqueResult:
-        """Parse the VLM response into a CritiqueResult."""
-        try:
-            data = json.loads(response)
-            return CritiqueResult(
-                critic_suggestions=data.get("critic_suggestions", []),
-                revised_description=data.get("revised_description"),
-            )
-        except (json.JSONDecodeError, KeyError) as e:
-            logger.warning("Failed to parse critic response", error=str(e))
-            # Conservative fallback: empty suggestions means no revision needed
-            return CritiqueResult(
-                critic_suggestions=[],
-                revised_description=None,
-            )
+        """Parse the VLM response into a CritiqueResult.
+
+        Uses extract_json for robust parsing — handles markdown fences
+        and conversational text that open-weight models often produce.
+        """
+        data = extract_json(response)
+        if isinstance(data, dict):
+            try:
+                return CritiqueResult(
+                    critic_suggestions=data.get("critic_suggestions", []),
+                    revised_description=data.get("revised_description"),
+                )
+            except (KeyError, TypeError) as e:
+                logger.warning("Failed to build CritiqueResult from parsed JSON", error=str(e))
+
+        logger.warning("Failed to parse critic response as JSON")
+        # Conservative fallback: empty suggestions means no revision needed
+        return CritiqueResult(
+            critic_suggestions=[],
+            revised_description=None,
+        )

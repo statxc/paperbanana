@@ -6,6 +6,7 @@ import base64
 import datetime
 import hashlib
 import json
+import re
 import uuid
 from io import BytesIO
 from pathlib import Path
@@ -169,6 +170,78 @@ def detect_image_mime_type(path: str | Path) -> str:
     # Fall back to extension-based guess.
     mime, _ = mimetypes.guess_type(str(path))
     return mime or "application/octet-stream"
+
+
+def extract_json(text: str) -> dict | list | None:
+    """Best-effort JSON extraction from free-form VLM output.
+
+    Many open-weight models don't support structured JSON mode, so they
+    wrap JSON in markdown fences or add conversational text around it.
+    This tries, in order:
+      1. Direct json.loads on the full text
+      2. Extract from ```json ... ``` fenced blocks
+      3. Extract from bare ``` ... ``` fenced blocks
+      4. Find the first { ... } or [ ... ] substring via bracket matching
+
+    Returns the parsed object, or None if nothing worked.
+    """
+    text = text.strip()
+
+    # 1) Maybe the entire response is valid JSON already.
+    try:
+        return json.loads(text)
+    except (json.JSONDecodeError, ValueError):
+        pass
+
+    # 2) Try ```json ... ``` fenced block.
+    m = re.search(r"```json\s*\n(.*?)```", text, re.DOTALL)
+    if m:
+        try:
+            return json.loads(m.group(1).strip())
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+    # 3) Try bare ``` ... ``` fenced block.
+    m = re.search(r"```\s*\n(.*?)```", text, re.DOTALL)
+    if m:
+        try:
+            return json.loads(m.group(1).strip())
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+    # 4) Find the outermost { ... } or [ ... ] substring.
+    for open_ch, close_ch in [("{", "}"), ("[", "]")]:
+        start = text.find(open_ch)
+        if start == -1:
+            continue
+        depth = 0
+        in_string = False
+        escape_next = False
+        for i in range(start, len(text)):
+            ch = text[i]
+            if escape_next:
+                escape_next = False
+                continue
+            if ch == "\\":
+                escape_next = True
+                continue
+            if ch == '"':
+                in_string = not in_string
+                continue
+            if in_string:
+                continue
+            if ch == open_ch:
+                depth += 1
+            elif ch == close_ch:
+                depth -= 1
+                if depth == 0:
+                    try:
+                        return json.loads(text[start : i + 1])
+                    except (json.JSONDecodeError, ValueError):
+                        break
+        # depth never reached zero or parse failed — fall through
+
+    return None
 
 
 def find_prompt_dir() -> str:

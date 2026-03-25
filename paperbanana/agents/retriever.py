@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-import json
-
 import structlog
 
 from paperbanana.agents.base import BaseAgent
 from paperbanana.core.types import DiagramType, ReferenceExample
+from paperbanana.core.utils import extract_json
 from paperbanana.providers.base import VLMProvider
 
 logger = structlog.get_logger()
@@ -77,16 +76,18 @@ class RetrieverAgent(BaseAgent):
             num_examples=num_examples,
         )
 
-        # Call the VLM
+        # Call the VLM — only request JSON mode if the provider supports it.
+        use_json = getattr(self.vlm, "supports_json_mode", True)
         logger.info(
             "Running retriever agent",
             num_candidates=len(candidates),
             num_requested=num_examples,
+            json_mode=use_json,
         )
         response = await self.vlm.generate(
             prompt=prompt,
             temperature=0.3,  # Low temperature for consistent selection
-            response_format="json",
+            response_format="json" if use_json else None,
         )
 
         # Parse response
@@ -117,18 +118,14 @@ class RetrieverAgent(BaseAgent):
         Handles both 'selected_ids' (our format) and 'top_10_papers'/'top_10_plots'
         (paper's format) JSON keys for robustness.
         """
-        try:
-            data = json.loads(response)
-            selected_ids = (
-                data.get("selected_ids")
-                or data.get("top_10_papers")
-                or data.get("top_10_plots")
-                or []
-            )
-        except json.JSONDecodeError:
+        data = extract_json(response)
+        if not isinstance(data, dict):
             logger.warning("Failed to parse retriever response as JSON, using fallback")
-            # Fallback: return first N candidates
             return candidates
+
+        selected_ids = (
+            data.get("selected_ids") or data.get("top_10_papers") or data.get("top_10_plots") or []
+        )
 
         # Map IDs back to ReferenceExample objects
         id_to_example = {c.id: c for c in candidates}

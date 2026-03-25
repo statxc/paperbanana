@@ -52,6 +52,16 @@ class VLMProvider(ABC):
         """
         ...
 
+    @property
+    def supports_json_mode(self) -> bool:
+        """Whether this provider reliably handles response_format='json'.
+
+        Hosted APIs (OpenAI, Gemini, Anthropic) support this natively.
+        Local/open-weight backends often don't — override to return False
+        so agents fall back to prompt-based JSON and robust parsing.
+        """
+        return True
+
     def is_available(self) -> bool:
         """Check if this provider is configured and available."""
         return True
