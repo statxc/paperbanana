@@ -116,6 +116,9 @@ class Settings(BaseSettings):
     ollama_json_mode: bool = Field(default=False, alias="OLLAMA_JSON_MODE")
 
     # OpenAI-local settings (vLLM, llama.cpp, etc. behind OpenAI-compatible API)
+    openai_local_base_url: str = Field(
+        default="http://localhost:8000/v1", alias="OPENAI_LOCAL_BASE_URL"
+    )
     openai_local_json_mode: bool = Field(default=False, alias="OPENAI_LOCAL_JSON_MODE")
 
     # AWS Bedrock settings

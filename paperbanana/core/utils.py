@@ -209,37 +209,44 @@ def extract_json(text: str) -> dict | list | None:
         except (json.JSONDecodeError, ValueError):
             pass
 
-    # 4) Find the outermost { ... } or [ ... ] substring.
+    # 4) Find { ... } or [ ... ] substrings via bracket matching.
+    # If the first candidate fails to parse, keep scanning for the next one.
     for open_ch, close_ch in [("{", "}"), ("[", "]")]:
-        start = text.find(open_ch)
-        if start == -1:
-            continue
-        depth = 0
-        in_string = False
-        escape_next = False
-        for i in range(start, len(text)):
-            ch = text[i]
-            if escape_next:
-                escape_next = False
-                continue
-            if ch == "\\":
-                escape_next = True
-                continue
-            if ch == '"':
-                in_string = not in_string
-                continue
-            if in_string:
-                continue
-            if ch == open_ch:
-                depth += 1
-            elif ch == close_ch:
-                depth -= 1
-                if depth == 0:
-                    try:
-                        return json.loads(text[start : i + 1])
-                    except (json.JSONDecodeError, ValueError):
+        search_from = 0
+        while True:
+            start = text.find(open_ch, search_from)
+            if start == -1:
+                break
+            depth = 0
+            in_string = False
+            escape_next = False
+            for i in range(start, len(text)):
+                ch = text[i]
+                if in_string:
+                    # Only handle escapes inside JSON strings — a backslash
+                    # in surrounding prose (e.g. LaTeX \frac{}) is irrelevant.
+                    if escape_next:
+                        escape_next = False
+                    elif ch == "\\":
+                        escape_next = True
+                    elif ch == '"':
+                        in_string = False
+                    continue
+                if ch == '"':
+                    in_string = True
+                    continue
+                if ch == open_ch:
+                    depth += 1
+                elif ch == close_ch:
+                    depth -= 1
+                    if depth == 0:
+                        try:
+                            return json.loads(text[start : i + 1])
+                        except (json.JSONDecodeError, ValueError):
+                            pass
                         break
-        # depth never reached zero or parse failed — fall through
+            # Move past this failed candidate and try the next one.
+            search_from = start + 1
 
     return None
 

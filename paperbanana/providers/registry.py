@@ -144,7 +144,7 @@ class ProviderRegistry:
             return OpenAIVLM(
                 api_key=settings.openai_api_key or "not-needed",
                 model=settings.openai_vlm_model or settings.vlm_model,
-                base_url=settings.openai_base_url,
+                base_url=settings.openai_local_base_url,
                 json_mode=settings.openai_local_json_mode,
                 provider_name="openai_local",
             )
