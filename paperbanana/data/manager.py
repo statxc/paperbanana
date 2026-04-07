@@ -18,7 +18,7 @@ import shutil
 import tempfile
 import zipfile
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, Literal, Optional
 
 import structlog
 
@@ -32,8 +32,12 @@ DATASET_URL = (
 )
 DATASET_VERSION = "1.0.0"
 
-# Built-in reference set ships with the package (13 curated examples)
-_BUILTIN_THRESHOLD = 50  # If cache has > this many examples, it's the expanded set
+# Curated expansion — lightweight set of 20–35 reference images
+CURATED_EXPANSION_URL = (
+    "https://huggingface.co/datasets/dwzhu/PaperBananaBench"
+    f"/resolve/{DATASET_REVISION}/CuratedExpansion.zip"
+)
+CURATED_EXPANSION_VERSION = "1.0.0"
 
 
 def default_cache_dir() -> Path:
@@ -99,16 +103,34 @@ class DatasetManager:
         """Path to dataset version info."""
         return self.reference_dir / "dataset_info.json"
 
-    def is_downloaded(self) -> bool:
-        """Check if the expanded reference set is available in cache."""
-        if not self.index_path.exists():
+    def is_downloaded(self, dataset: str | None = None) -> bool:
+        """Check if an expanded reference set is available in cache.
+
+        Args:
+            dataset: Check for a specific dataset ('curated' or 'full_bench').
+                     If None, returns True if *any* expansion is cached.
+
+        Note:
+            Caches that pre-date ``dataset_info.json`` (only ``index.json``
+            present) are treated as an untracked expansion when *dataset* is
+            None, but will not match a specific dataset name.
+        """
+        info = self.get_info()
+        if info is None:
+            # Fallback: legacy caches may only have index.json with no
+            # dataset_info.json.  Treat them as "something is downloaded"
+            # when no specific dataset is requested.
+            if dataset is None and self.index_path.exists():
+                return True
             return False
-        try:
-            with open(self.index_path) as f:
-                data = json.load(f)
-            return len(data.get("examples", [])) > _BUILTIN_THRESHOLD
-        except (json.JSONDecodeError, OSError):
-            return False
+        downloaded = info.get("datasets", [])
+        # Back-compat: old dataset_info.json without "datasets" key
+        # was written by the full_bench downloader
+        if not downloaded and info.get("source") == DATASET_URL:
+            downloaded = ["full_bench"]
+        if dataset is not None:
+            return dataset in downloaded
+        return len(downloaded) > 0
 
     def get_info(self) -> Optional[dict]:
         """Get cached dataset info (version, revision, count).
@@ -138,27 +160,124 @@ class DatasetManager:
     def download(
         self,
         *,
+        dataset: Literal["full_bench", "curated"] = "full_bench",
         task: str = "diagram",
         force: bool = False,
         progress_callback: Optional[Callable[[str], None]] = None,
     ) -> int:
-        """Download and cache the official PaperBananaBench dataset.
+        """Download and cache a reference dataset.
 
         Args:
+            dataset: Which dataset to fetch — 'full_bench' for the full
+                     PaperBananaBench (~257MB) or 'curated' for the lightweight
+                     curated expansion (~20–35 images).
             task: Which references to import ('diagram', 'plot', or 'both').
+                  Only used for 'full_bench'.
             force: Re-download even if already cached.
             progress_callback: Optional callback(message) for progress updates.
 
         Returns:
-            Number of examples imported.
+            Number of examples in the cache after import.
 
         Raises:
             RuntimeError: If download or extraction fails.
         """
-        if self.is_downloaded() and not force:
+        if self.is_downloaded(dataset=dataset) and not force:
             count = self.get_example_count()
-            logger.info("Dataset already cached", count=count, path=str(self.reference_dir))
+            logger.info(
+                "Dataset already cached", dataset=dataset, count=count, path=str(self.reference_dir)
+            )
             return count
+
+        if dataset == "curated":
+            return self._download_curated(force=force, progress_callback=progress_callback)
+        return self._download_full_bench(
+            task=task, force=force, progress_callback=progress_callback
+        )
+
+    def _download_curated(
+        self,
+        *,
+        force: bool = False,
+        progress_callback: Optional[Callable[[str], None]] = None,
+    ) -> int:
+        """Download the curated expansion and merge into cache."""
+
+        def _log(msg: str):
+            logger.info(msg)
+            if progress_callback:
+                progress_callback(msg)
+
+        with tempfile.TemporaryDirectory(prefix="paperbanana_curated_") as tmp:
+            tmp_dir = Path(tmp)
+            zip_path = tmp_dir / "CuratedExpansion.zip"
+
+            _log("Downloading curated expansion set...")
+            try:
+                _download_file(CURATED_EXPANSION_URL, zip_path)
+            except Exception as exc:
+                raise RuntimeError(
+                    f"Failed to download curated expansion from {CURATED_EXPANSION_URL} "
+                    f"— the artifact may not be published yet. Original error: {exc}"
+                ) from exc
+
+            _log("Extracting curated expansion...")
+            with zipfile.ZipFile(zip_path) as zf:
+                zf.extractall(tmp_dir)
+
+            # Expect the zip to contain index.json + images/
+            expansion_dir = tmp_dir / "CuratedExpansion"
+            if not expansion_dir.exists():
+                candidates = list(tmp_dir.glob("*/index.json"))
+                if candidates:
+                    expansion_dir = candidates[0].parent
+                else:
+                    raise RuntimeError("Could not find index.json in curated expansion archive.")
+
+            expansion_index = expansion_dir / "index.json"
+            if not expansion_index.exists():
+                raise RuntimeError("Curated expansion archive missing index.json.")
+
+            with open(expansion_index, encoding="utf-8") as f:
+                expansion_data = json.load(f)
+
+            new_examples = expansion_data.get("examples", [])
+            if not new_examples:
+                raise RuntimeError("Curated expansion contains no examples.")
+
+            # Copy images into cache
+            self.reference_dir.mkdir(parents=True, exist_ok=True)
+            images_dir = self.reference_dir / "images"
+            images_dir.mkdir(exist_ok=True)
+
+            src_images = expansion_dir / "images"
+            for ex in new_examples:
+                img_rel = ex.get("image_path", "")
+                if img_rel and src_images.exists():
+                    src = expansion_dir / img_rel
+                    if src.exists():
+                        dest = self.reference_dir / img_rel
+                        dest.parent.mkdir(parents=True, exist_ok=True)
+                        if not dest.exists() or force:
+                            shutil.copy2(src, dest)
+
+            # Merge into existing cache index
+            count = _merge_index(self.index_path, new_examples)
+
+            # Update dataset_info.json
+            self._record_dataset("curated", CURATED_EXPANSION_VERSION, CURATED_EXPANSION_URL, count)
+
+            _log(f"Merged {len(new_examples)} curated examples → {count} total in cache")
+            return count
+
+    def _download_full_bench(
+        self,
+        *,
+        task: str = "diagram",
+        force: bool = False,
+        progress_callback: Optional[Callable[[str], None]] = None,
+    ) -> int:
+        """Download the full PaperBananaBench dataset."""
 
         def _log(msg: str):
             logger.info(msg)
@@ -194,21 +313,55 @@ class DatasetManager:
             images_dir = self.reference_dir / "images"
             images_dir.mkdir(exist_ok=True)
 
-            count = _import_from_bench(bench_dir, task, images_dir, self.index_path)
+            bench_examples = _import_from_bench(bench_dir, task, images_dir)
+            count = _merge_index(self.index_path, bench_examples)
 
-            # Write dataset info for version tracking
-            info = {
-                "version": DATASET_VERSION,
-                "revision": DATASET_REVISION,
-                "source": DATASET_URL,
-                "task": task,
-                "example_count": count,
-            }
-            with open(self.info_path, "w") as f:
-                json.dump(info, f, indent=2)
+            # Update dataset_info.json
+            self._record_dataset(
+                "full_bench",
+                DATASET_VERSION,
+                DATASET_URL,
+                count,
+                extra={"revision": DATASET_REVISION, "task": task},
+            )
 
             _log(f"Cached {count} reference examples to {self.reference_dir}")
             return count
+
+    def _record_dataset(
+        self,
+        dataset: str,
+        version: str,
+        source: str,
+        example_count: int,
+        extra: dict | None = None,
+    ) -> None:
+        """Update dataset_info.json, preserving the list of downloaded datasets."""
+        info = self.get_info() or {}
+        downloaded = set(info.get("datasets", []))
+        if not downloaded and info.get("source") == DATASET_URL:
+            downloaded.add("full_bench")
+        downloaded.add(dataset)
+
+        dataset_meta: dict = info.get("dataset_meta", {})
+        meta_entry: dict = {"version": version, "source": source}
+        if extra:
+            meta_entry.update(extra)
+        dataset_meta[dataset] = meta_entry
+
+        info.update(
+            {
+                "datasets": sorted(downloaded),
+                "dataset_meta": dataset_meta,
+                "example_count": example_count,
+            }
+        )
+        info.pop("version", None)
+        info.pop("source", None)
+        info.pop("revision", None)
+
+        with open(self.info_path, "w") as f:
+            json.dump(info, f, indent=2)
 
     def clear(self) -> None:
         """Remove cached dataset."""
@@ -228,22 +381,78 @@ def _download_file(url: str, dest: Path) -> None:
                 f.write(chunk)
 
 
+def _merge_index(index_path: Path, new_examples: list[dict]) -> int:
+    """Merge new examples into an existing cached index.json.
+
+    Deduplicates by example ID — new entries overwrite existing ones with the
+    same ID. Returns the total example count after merge.
+    """
+    existing_examples: list[dict] = []
+    if index_path.exists():
+        try:
+            with open(index_path, encoding="utf-8") as f:
+                data = json.load(f)
+            existing_examples = data.get("examples", [])
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    by_id: dict[str, dict] = {}
+    no_id: list[dict] = []
+    for ex in existing_examples:
+        ex_id = ex.get("id", "")
+        if ex_id:
+            by_id[ex_id] = ex
+        else:
+            no_id.append(ex)
+    for ex in new_examples:
+        ex_id = ex.get("id", "")
+        if ex_id:
+            by_id[ex_id] = ex
+        else:
+            no_id.append(ex)
+
+    merged = list(by_id.values()) + no_id
+    categories = sorted(set(e.get("category", "") for e in merged if e.get("category")))
+
+    index_data = {
+        "metadata": {
+            "name": "paperbanana_combined",
+            "description": (
+                f"Combined reference set. "
+                f"{len(merged)} examples across {len(categories)} categories."
+            ),
+            "version": "3.0.0",
+            "categories": categories,
+            "total_examples": len(merged),
+        },
+        "examples": merged,
+    }
+
+    with open(index_path, "w", encoding="utf-8") as f:
+        json.dump(index_data, f, indent=2, ensure_ascii=False)
+
+    return len(merged)
+
+
 def _import_from_bench(
     bench_dir: Path,
     task: str,
     images_dir: Path,
-    index_path: Path,
-) -> int:
-    """Convert official dataset format to community index.json format.
+) -> list[dict]:
+    """Convert official dataset format to a list of example dicts.
+
+    Images are copied into *images_dir*; the caller is responsible for
+    merging the returned examples into the cached ``index.json`` (via
+    ``_merge_index``) so that previously-downloaded datasets (e.g. the
+    curated expansion) are preserved.
 
     Args:
         bench_dir: Extracted PaperBananaBench directory.
         task: 'diagram', 'plot', or 'both'.
         images_dir: Destination directory for reference images.
-        index_path: Path to write the generated index.json.
 
     Returns:
-        Number of examples imported.
+        List of imported example dicts.
     """
     from PIL import Image
 
@@ -317,28 +526,7 @@ def _import_from_bench(
     if not all_examples:
         raise RuntimeError("No examples could be imported from the dataset.")
 
-    # Write index.json
-    categories = sorted(set(e.get("category", "") for e in all_examples if e.get("category")))
-
-    index_data = {
-        "metadata": {
-            "name": "paperbanana_bench",
-            "description": (
-                f"Reference set from official PaperBananaBench dataset. "
-                f"{len(all_examples)} examples across {len(categories)} categories."
-            ),
-            "version": "3.0.0",
-            "source": "https://huggingface.co/datasets/dwzhu/PaperBananaBench",
-            "categories": categories,
-            "total_examples": len(all_examples),
-        },
-        "examples": all_examples,
-    }
-
-    with open(index_path, "w", encoding="utf-8") as f:
-        json.dump(index_data, f, indent=2, ensure_ascii=False)
-
-    return len(all_examples)
+    return all_examples
 
 
 def resolve_reference_path(
@@ -367,7 +555,7 @@ def resolve_reference_path(
         logger.info("Using explicitly configured reference set", path=settings_path)
         return settings_path
 
-    # Check if expanded dataset is cached
+    # Check if any expanded dataset is cached (uses dataset_info.json marker)
     manager = DatasetManager(cache_dir=cache_dir)
     if manager.is_downloaded():
         logger.info(
